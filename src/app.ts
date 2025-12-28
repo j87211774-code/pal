@@ -5,6 +5,8 @@ import healthRouter from './routes/health';
 import authRouter from './routes/auth';
 import usersRouter from './routes/users';
 import reportsRouter from './routes/reports';
+import ngosRouter from './routes/ngos';
+import projectsRouter from './routes/projects';
 
 const app = express();
 
@@ -15,6 +17,8 @@ app.use('/health', healthRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/reports', reportsRouter);
+app.use('/api/ngos', ngosRouter);
+app.use('/api/projects', projectsRouter);
 
 app.get('/', (_req, res) => res.json({ status: 'ok', service: 'vision-ngo-backend' }));
 
