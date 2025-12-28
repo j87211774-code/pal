@@ -1,0 +1,70 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // NOTE: For local dev this schema uses SQLite. For production, switch the
+  // provider to `postgresql` and set DATABASE_URL accordingly.
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id       String   @id @default(uuid())
+  email    String   @unique
+  name     String?
+  password String
+  role     String
+  createdAt DateTime @default(now())
+  projects Project[] @relation("ProjectUsers")
+}
+
+model NGO {
+  id   String @id @default(uuid())
+  name String
+  code String? @unique
+  projects Project[]
+}
+
+model Project {
+  id        String   @id @default(uuid())
+  title     String
+  startDate DateTime
+  endDate   DateTime
+  budget    Float?
+  ngo       NGO?     @relation(fields: [ngoId], references: [id])
+  ngoId     String?
+  objectives String?
+  users     User[]   @relation("ProjectUsers")
+  reports   Report[]
+}
+
+model Report {
+  id         String   @id @default(uuid())
+  project    Project  @relation(fields: [projectId], references: [id])
+  projectId  String
+  authorId   String
+  authorName String?
+  type       String
+  date       DateTime
+  hours      Float?
+  location   String?
+  content    String?
+  // For SQLite local dev, store attachments as a JSON string. In production
+  // with PostgreSQL this can be changed to a String[] or separate Attachment model.
+  attachments String?
+  status     String   @default("pending")
+  createdAt  DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  actorId   String
+  action    String
+  entity    String
+  entityId  String
+  // `meta` is stored as JSON string for SQLite local dev; migration to Postgres
+  // can use Json type where supported.
+  meta      String?
+  createdAt DateTime @default(now())
+}
