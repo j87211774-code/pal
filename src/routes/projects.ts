@@ -2,6 +2,10 @@ import { Router } from 'express';
 import prisma from '../prisma';
 import { requireAuth, requireRole } from '../middleware/auth';
 import { audit } from '../middleware/audit';
+import { generateExcel, generatePdf, generateWord, extForFormat } from '../lib/exports';
+import { saveExport, listExports, getExportPath } from '../lib/storage';
+import path from 'path';
+import fs from 'fs';
 
 const router = Router();
 
@@ -58,3 +62,72 @@ router.post('/:id/assign', requireAuth, requireRole('super_admin', 'project_mana
 });
 
 export default router;
+
+// Project exports: generate & optionally save
+router.post('/:id/export', requireAuth, async (req, res) => {
+  const { id } = req.params;
+  const { format = 'excel', save } = req.body as any;
+  const project = await prisma.project.findUnique({ where: { id }, include: { users: true, reports: true, ngo: true } });
+  if (!project) return res.status(404).json({ error: 'Not found' });
+
+  // authorization: admin roles or assigned users
+  const actor = (req as any).user;
+  const isAssigned = project.users.some((u:any) => u.id === actor.id);
+  const isAdmin = ['super_admin','project_manager','financial_officer'].includes(actor.role);
+  if (!isAdmin && !isAssigned) return res.status(403).json({ error: 'Forbidden' });
+
+  const projects = [project];
+  let buf: Buffer;
+  if (format === 'excel') buf = Buffer.from(await generateExcel(projects));
+  else if (format === 'pdf') buf = await generatePdf(projects);
+  else if (format === 'word') buf = Buffer.from(await generateWord(projects));
+  else return res.status(400).json({ error: 'Unsupported format' });
+
+  if (save) {
+    const ext = extForFormat(format);
+    const filename = `export-${id}-${Date.now()}.${ext}`;
+    const entry = await saveExport(id, filename, buf as Buffer, format === 'excel' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : format === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    // audit
+    await prisma.auditLog.create({ data: { actorId: actor.id, action: 'export_saved', entity: 'project', entityId: id, meta: JSON.stringify(entry) } });
+    return res.json({ saved: true, entry });
+  }
+
+  // stream file
+  const filename = `project-${id}.${extForFormat(format)}`;
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  if (format === 'excel') res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  if (format === 'pdf') res.setHeader('Content-Type', 'application/pdf');
+  if (format === 'word') res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  return res.send(buf);
+});
+
+// List saved exports for a project
+router.get('/:id/exports', requireAuth, async (req, res) => {
+  const { id } = req.params;
+  const project = await prisma.project.findUnique({ where: { id }, include: { users: true } });
+  if (!project) return res.status(404).json({ error: 'Not found' });
+  const actor = (req as any).user;
+  const isAssigned = project.users.some((u:any) => u.id === actor.id);
+  const isAdmin = ['super_admin','project_manager','financial_officer'].includes(actor.role);
+  if (!isAdmin && !isAssigned) return res.status(403).json({ error: 'Forbidden' });
+  const list = await listExports(id);
+  res.json(list);
+});
+
+// Download saved export
+router.get('/:id/exports/:file', requireAuth, async (req, res) => {
+  const { id, file } = req.params;
+  const project = await prisma.project.findUnique({ where: { id }, include: { users: true } });
+  if (!project) return res.status(404).json({ error: 'Not found' });
+  const actor = (req as any).user;
+  const isAssigned = project.users.some((u:any) => u.id === actor.id);
+  const isAdmin = ['super_admin','project_manager','financial_officer'].includes(actor.role);
+  if (!isAdmin && !isAssigned) return res.status(403).json({ error: 'Forbidden' });
+  const p = await getExportPath(id, file);
+  if (!p) return res.status(404).json({ error: 'File not found' });
+  if (typeof p === 'string' && (p.startsWith('http://') || p.startsWith('https://'))) {
+    // S3 presigned URL
+    return res.redirect(p);
+  }
+  return res.sendFile(p as string);
+});

@@ -7,8 +7,42 @@ on:
     branches: [ main, master ]
 
 jobs:
-  build:
+  quick:
+    name: Quick checks (lint + smoke)
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: |
+          npm run lint --silent > lint-report.txt 2>&1 || (cat lint-report.txt && exit 1)
+
+      - name: Smoke tests (fast)
+        run: npm test --silent tests/health.test.ts tests/auth.test.ts || true
+
+      - name: Upload quick job artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: quick-job-logs
+          path: |
+            ./lint-report.txt
+            ./jest-smoke-output.txt
+
+  build:
+    name: Build & Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        storage: [local, s3]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,5 +58,57 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Run tests
-        run: npm test --silent
+      - name: Run tests + coverage
+        env:
+          EXPORT_STORAGE: ${{ matrix.storage == 's3' && 's3' || '' }}
+          S3_BUCKET: ${{ matrix.storage == 's3' && 'test-bucket' || '' }}
+        run: |
+          # Run full test suite with coverage and capture JSON output for artifacts
+          npx jest --coverage --coverageDirectory=coverage-${{ matrix.storage }} --json --outputFile=jest-results-${{ matrix.storage }}.json
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: jest-results-${{ matrix.storage }}
+          path: jest-results-${{ matrix.storage }}.json
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.storage }}
+          path: coverage-${{ matrix.storage }}
+
+  codecov-comment:
+    name: Comment coverage on PRs
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests + coverage (PR)
+        run: npx jest --coverage --coverageDirectory=coverage-pr --json --outputFile=jest-results-pr.json
+
+      - name: Post Codecov comment
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage-pr/lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+          # Request Codecov to post a PR comment with coverage diff
+          comment: true
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage-${{ matrix.storage }}/lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
