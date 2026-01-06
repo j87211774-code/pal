@@ -121,6 +121,7 @@ router.get('/projects/export', requireAuth, requireRole('super_admin', 'project_
     return res.send(buf);
   }
 
+// Preview route (no auth) - useful for local demo/mock UIs. Remove or protect in production.
   if (format === 'word') {
     const buf = await generateWord(projects);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
@@ -130,8 +131,6 @@ router.get('/projects/export', requireAuth, requireRole('super_admin', 'project_
 
   res.status(400).json({ error: 'Unsupported format' });
 });
-
-export default router;
 
 // Preview route (no auth) - useful for local demo/mock UIs. Remove or protect in production.
 router.get('/preview', async (_req, res) => {
@@ -156,3 +155,5 @@ router.get('/preview', async (_req, res) => {
 
   res.json({ counts: { total, byYear, byUser: byUserNamed, byStatus }, rows });
 });
+
+export default router;
