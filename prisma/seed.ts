@@ -58,18 +58,19 @@ async function main() {
     console.log(`Creating ${numProjects} demo projects...`);
     for (let i = 1; i <= numProjects; i++) {
       const title = `Demo Project ${i}`;
-      await prisma.project.upsert({
-        where: { title },
-        update: {},
-        create: {
-          title,
-          startDate: new Date(),
-          endDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30),
-          budget: Math.floor(Math.random() * 100000),
-          ngoId: ngo.id,
-          objectives: 'Demo objectives for seeding'
-        }
-      });
+      const existing = await prisma.project.findFirst({ where: { title } });
+      if (!existing) {
+        await prisma.project.create({
+          data: {
+            title,
+            startDate: new Date(),
+            endDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30),
+            budget: Math.floor(Math.random() * 100000),
+            ngoId: ngo.id,
+            objectives: 'Demo objectives for seeding'
+          }
+        });
+      }
     }
   }
 }
